@@ -1,0 +1,7 @@
+__pycache__
+*pyc
+logs
+/pac3man/
+
+.idea
+.vscode

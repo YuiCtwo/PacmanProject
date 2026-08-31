@@ -1,0 +1,2 @@
+
+FOOD_SCORE = 10
