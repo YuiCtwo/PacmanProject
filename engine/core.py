@@ -1,32 +1,17 @@
-from enum import IntEnum
-from dataclasses import dataclass
-from typing import Tuple, Dict, List, Optional, Set
-import copy
-import numpy as np
+from __future__ import annotations
 
-from engine.agent import BaseAgent, GhostAgent, AgentState
+from dataclasses import dataclass
+from typing import Tuple, Dict, List, Optional, Set, TYPE_CHECKING
+from copy import deepcopy
+
+from engine.agent import BaseAgent, GhostRandomWalkAgent, PacmanKeyBoardAgent
+from engine.constant import Action
 from engine.layout import GameLayout
-from engine.renderer import GameRenderer
 from engine.rule import BacisPacmanRules, SimpleRules
 from utils.pos_utils import Position2D
 
-
-class Action(IntEnum):
-    STOP = 0
-    UP = 1
-    DOWN = 2
-    LEFT = 3
-    RIGHT = 4
-
-    @property
-    def direction_vector(self) -> Position2D:
-        return {
-            Action.STOP: Position2D(0, 0),  # x, y
-            Action.UP: Position2D(0, 1),
-            Action.DOWN: Position2D(0, -1),
-            Action.LEFT: Position2D(1, 0),
-            Action.RIGHT: Position2D(-1, 0),
-        }[self]
+if TYPE_CHECKING:
+    from engine.renderer import GameRenderer
 
 
 class GameState:
@@ -51,6 +36,21 @@ class GameState:
         self.ghost_actions = [Action.STOP] * self.layout.num_ghost
 
         self.is_gameOver = False
+        self.is_gameWin = False
+
+        # 豆子和大力丸的可见状态，由 renderer 读取
+        self.food_visible: Dict[Tuple[int, int], bool] = {
+            (x, y): True for x, y in layout.foods
+        }
+        self.capsule_visible: Dict[Tuple[int, int], bool] = {
+            (x, y): True for x, y in layout.capsules
+        }
+
+        # 上一帧位置，供 renderer 做动画插值
+        self.pacman_prev_pos = deepcopy(self.pacman_position)
+        self.ghost_prev_pos = deepcopy(self.ghost_positions)
+
+        self.ghost_scared_time = [0] * self.layout.num_ghost
 
 
 class BasicGameRunner:
@@ -58,50 +58,53 @@ class BasicGameRunner:
     def __init__(self,
         layout: GameLayout,
         pacman_agent: BaseAgent,
-        renderer: GameRenderer,
-        quiet: bool = False,
-        user_input: bool = True
+        renderer: GameRenderer
     ):
         self._layout = layout
         self._pacman_agent = pacman_agent
-        self._ghost_agents = [GhostAgent() for _ in range(self._layout.num_ghost)]
+        self._ghost_agents = [GhostRandomWalkAgent(idx) for idx in range(self._layout.num_ghost)]
         self._renderer = renderer
         self._agents = [self._pacman_agent] + self._ghost_agents  # 玩家永远先行动
-        self._quiet = quiet
         self._rule = SimpleRules
-        self._user_input = user_input
 
         self._init()
 
     def _init(self):
         self._game_state = GameState(self._layout)
         self._agent_states = {}
-
-    def _update(self):
-        pacman_action = self._agent_states["pacman"]["next_action"]
-        self._rule.apply_action(self._game_state, pacman_action)
+        if isinstance(self._pacman_agent, PacmanKeyBoardAgent):
+            self._renderer.register_key_press_callback(self._pacman_agent.on_key_press)
+            self._renderer.register_key_release_callback(self._pacman_agent.on_key_release)
 
     def run(self):
 
         while True:
 
             # 1. 玩家行动
-            self._agent_states["pacman"] = self._pacman_agent.act(self._game_state)
-            # 2. Ghost 行动
-            for one_agent in self._ghost_agents:
-                self._agent_states[f"ghost_{one_agent.agent_index}"] = one_agent.act(self._game_state)
+            pacman_action = self._pacman_agent.act(self._game_state)
+            
+            # 2. 更新游戏状态
+            self._rule.apply_pacman_action(self._game_state, pacman_action)
+            self._rule.apply_collision(self._game_state)
+            
+            # 3. Ghost 行动
+            for i, one_agent in enumerate(self._ghost_agents):
+                ghost_action = one_agent.act(self._game_state)
+                self._rule.apply_ghost_action(self._game_state, i, ghost_action)
+            
+            # 4. 更新游戏状态
+            self._rule.apply_collision(self._game_state)
 
-            # 3. 更新游戏状态
-            self._update()
-
-            # 4. 判断游戏是否结束
-            if self._game_state.is_gameOver:
+            # 5. 判断游戏是否结束
+            if self._game_state.is_gameOver or self._game_state.is_gameWin:
                 break
 
-            # 5. 渲染
+            # 6. 渲染
             self._renderer.render(self._game_state)
 
         # TODO: log
-
         self._renderer.close()
+
+    def get_game_state(self) -> GameState:
+        return self._game_state
 

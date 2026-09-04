@@ -37,7 +37,7 @@ class GameLayout:
                 elif char == '.':
                     foods.add((x, y))
                 elif char == 'o':
-                    capsules.add(Position2D(x, y))
+                    capsules.add((x, y))
                 elif char == 'P':
                     pacman_start = Position2D(x, y)
                 elif char == 'G':
